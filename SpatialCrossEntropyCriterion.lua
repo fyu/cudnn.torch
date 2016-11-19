@@ -14,11 +14,12 @@ local SpatialCrossEntropyCriterion, parent = torch.class('cudnn.SpatialCrossEntr
     input = batchSize x nClasses x H x W
     target = batchSize x H x W
 ]]--
-function SpatialCrossEntropyCriterion:__init(weights)
+function SpatialCrossEntropyCriterion:__init(weights, ignored_label)
     parent.__init(self)
     self.slsm = cudnn.SpatialLogSoftMax()
     self.nll = nn.ClassNLLCriterion(weights)
     self.sizeAverage = true
+    self.snll = nn.SpatialClassNLLCriterion(weights, true, ignored_label)
 end
 
 local transpose = function(input)
@@ -43,12 +44,14 @@ function SpatialCrossEntropyCriterion:updateOutput(input, target)
     -- apply SpatialLogSoftMax to input
     self.slsm:updateOutput(input)
 
-    -- Update submodule sizeAverage to make it consistent.
-    self.nll.sizeAverage = self.sizeAverage
-
-    -- fold the height and width dims into the mini-batch dim.
-    self.nll:updateOutput(transpose(self.slsm.output), target:view(-1))
-    self.output = self.nll.output
+--    -- Update submodule sizeAverage to make it consistent.
+--    self.nll.sizeAverage = self.sizeAverage
+--
+--    -- fold the height and width dims into the mini-batch dim.
+--    self.nll:updateOutput(transpose(self.slsm.output), target:view(-1))
+--    self.output = self.nll.output
+    self.snll:updateOutput(self.slsm.output, target)
+    self.output = self.snll.output
     return self.output
 end
 
@@ -59,10 +62,12 @@ function SpatialCrossEntropyCriterion:updateGradInput(input, target)
     assert(input:size(3) == target:size(2), 'input and target should be of same size')
     assert(input:size(4) == target:size(3), 'input and target should be of same size')
 
-    self.nll:updateGradInput(transpose(self.slsm.output), target:view(-1))
-
-    -- unfold the height and width dims back
-    self.slsm:updateGradInput(input, transposeBack(self.nll.gradInput, input))
+--    self.nll:updateGradInput(transpose(self.slsm.output), target:view(-1))
+--
+--    -- unfold the height and width dims back
+--    self.slsm:updateGradInput(input, transposeBack(self.nll.gradInput, input))
+    self.snll:updateGradInput(self.slsm.output, target)
+    self.slsm:updateGradInput(input, self.snll.gradInput)
     self.gradInput = self.slsm.gradInput
     return self.gradInput
 end
